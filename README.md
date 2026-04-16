@@ -20,9 +20,15 @@ uv run python attack.py      # run the AntiNODE attack
 uv run python evaluate.py    # print results table and generate figures
 ```
 
-Default hyperparameters match the paper: Adam lr=5e-4, 2000 iterations,
-dopri5 with rtol=atol=1e-3. Attack script accepts `--num-images`,
-`--betas "0,10,100,1000"`, `--iters`, `--lr`, `--results-dir`.
+Optimizer matches the paper (Adam, lr=5e-4, 2000 iterations, dopri5 with
+rtol=atol=1e-3). The `--betas` default is `"0,0.001,0.01,0.1,1"`, which
+reproduces the results table below; the paper's nominal β ∈ {10, 100,
+1000, 10000} are calibrated for a different loss proxy and saturate at
+baseline NFE on our stack — see the thesis lab notebook for the
+β-scaling discussion.
+
+Attack flags: `--checkpoint`, `--num-images`, `--betas`, `--iters`,
+`--lr`, `--data-dir`, `--results-dir`.
 
 ## Results
 

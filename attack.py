@@ -279,8 +279,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="AntiNODE latency attack on CIFAR-10")
     parser.add_argument("--checkpoint", type=str, default="checkpoints/best.pth")
     parser.add_argument("--num-images", type=int, default=100)
-    parser.add_argument("--betas", type=str, default="0,10,100,1000",
-                        help="Comma-separated L2 penalty weights")
+    parser.add_argument("--betas", type=str, default="0,0.001,0.01,0.1,1",
+                        help="Comma-separated L2 penalty weights "
+                             "(defaults are calibrated for our h0 proxy; "
+                             "see lab notebook for the discrepancy vs paper)")
     parser.add_argument("--iters", type=int, default=2000)
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--data-dir", type=str, default="data")
