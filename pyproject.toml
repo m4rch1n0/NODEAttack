@@ -1,0 +1,25 @@
+[project]
+name = "nodeattack"
+version = "0.1.0"
+description = "Reproduction of AntiNODE (ICCVW 2023) latency-surging attacks on Neural ODE classifiers"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.10.0",
+    "numpy>=2.0.0",
+    "pillow>=11.0.0",
+    "torch>=2.11.0",
+    "torchdiffeq>=0.2.5",
+    "torchvision>=0.26.0",
+    "tqdm>=4.67.0",
+    "triton-rocm>=3.6.0",
+]
+
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm7.2"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-rocm" }]
+torchvision = [{ index = "pytorch-rocm" }]
+triton-rocm = [{ index = "pytorch-rocm" }]
