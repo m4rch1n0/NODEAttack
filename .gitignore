@@ -19,6 +19,9 @@ checkpoints/
 # Results: commit the raw attack JSON, ignore regenerable artifacts
 results/figures/
 results/summary.json
+results/adv_tensors/
+results/attack_results_v1_*.json
+results/attack_run_*.log
 
 # OS
 .DS_Store
@@ -30,9 +33,6 @@ Thumbs.db
 
 # ROCm / HIP cache
 __hip_rtc_temp/
-
-# uv
-uv.lock
 
 # Misc
 *.swp

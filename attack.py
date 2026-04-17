@@ -213,6 +213,10 @@ def main(args):
     betas = [float(b) for b in args.betas.split(",")]
     all_results = []
 
+    adv_tensors_dir = results_dir / "adv_tensors"
+    adv_tensors_dir.mkdir(parents=True, exist_ok=True)
+    adv_tensors = {beta: {"images": [], "indices": []} for beta in betas}
+
     for idx in tqdm(range(args.num_images), desc="Images"):
         x_orig, label = test_set[idx]
         x_orig = x_orig.unsqueeze(0)
@@ -249,6 +253,13 @@ def main(args):
                 "time_s": round(elapsed, 1),
             }
 
+            # Squeeze batch dim: [1,3,32,32] -> [3,32,32] so the final
+            # stack yields [N,3,32,32] as expected downstream.
+            adv_tensors[beta]["images"].append(
+                result["best_x_adv"].detach().cpu().squeeze(0)
+            )
+            adv_tensors[beta]["indices"].append(idx)
+
             print(
                 f"    -> NFE: {orig_nfe} -> {result['best_nfe']}, "
                 f"L2={result['best_l2']:.4f}, time={elapsed:.1f}s"
@@ -259,6 +270,15 @@ def main(args):
         # Save incrementally
         with open(results_dir / "attack_results.json", "w") as f:
             json.dump(all_results, f, indent=2)
+
+        # Overwrite per-beta tensor files with the full accumulated set.
+        # O(N) writes but each is ~3MB and dwarfed by the attack's 2000
+        # Adam iters; guarantees no progress loss on Ctrl-C.
+        for beta in betas:
+            torch.save({
+                "images": torch.stack(adv_tensors[beta]["images"]),
+                "indices": torch.tensor(adv_tensors[beta]["indices"]),
+            }, adv_tensors_dir / f"beta_{beta}.pt")
 
     # Print summary
     print("\n" + "=" * 60)

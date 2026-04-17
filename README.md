@@ -17,7 +17,7 @@ flow models.
 uv sync                      # PyTorch 2.11+rocm7.2, torchdiffeq 0.2.5, etc.
 uv run python train.py       # train ODEClassifier on CIFAR-10 (~50 epochs)
 uv run python attack.py      # run the AntiNODE attack
-uv run python evaluate.py    # print results table and generate figures
+uv run python evaluate.py    # NFE table, benign wall-clock latency, figures
 ```
 
 Optimizer matches the paper (Adam, lr=5e-4, 2000 iterations, dopri5 with
@@ -35,6 +35,10 @@ Attack flags: `--checkpoint`, `--num-images`, `--betas`, `--iters`,
 CIFAR-10, Dopri5 (rtol=atol=1e-3), 250 test images, ODEClassifier
 trained to 84.47% accuracy.
 
+MNIST reproduction was out of scope: CIFAR-10 + Dopri5 is Table 1's
+primary setting and the one this thesis's Phase 2 (Flow Matching) will
+build on.
+
 | Setting              | NFE mean | Increase | L2 mean | Success | Flip |
 |----------------------|---------:|---------:|--------:|--------:|-----:|
 | Benign               |   26.00  |      —   |    —    |    —    |  —   |
@@ -43,8 +47,18 @@ trained to 84.47% accuracy.
 | Restricted β=0.01    |   29.00  | +11.5%   |  0.22   |  36.8%  |  8%  |
 
 Paper reference (Table 1, CIFAR-10 Dopri5): Unrestricted +42.5%,
-Restricted +37.5%. See `results/figures/` for NFE distributions, NFE vs
-L2 scatter, and attack success/flip-rate bar charts.
+Restricted +37.5%. β ∈ {0.1, 1} extend beyond the paper's restricted
+values; see `summary.json` for the full 5-β sweep.
+
+Benign wall-clock latency: **19.73 ± 0.40 ms** per image (batch=1, AMD
+RX 6900 XT + ROCm 7.2, 250-image sweep with 10 warmup forwards).
+Adversarial wall-clock is not measured directly — it scales
+proportionally to NFE, which is already reported.
+
+Figures and `summary.json` are not versioned in the repo. Regenerate
+them with `uv run python evaluate.py` — outputs land in
+`results/figures/` (NFE distribution, NFE vs L2 scatter, attack
+success / flip-rate bar charts) and `results/summary.json`.
 
 ## Thesis context
 

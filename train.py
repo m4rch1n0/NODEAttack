@@ -113,14 +113,6 @@ def train(args):
             }, checkpoint_dir / "best.pth")
             print(f"  -> New best: {accuracy:.4f}")
 
-    torch.save({
-        "epoch": args.epochs,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "accuracy": accuracy,
-        "avg_nfe": avg_nfe,
-    }, checkpoint_dir / "final.pth")
-
     with open(checkpoint_dir / "history.json", "w") as f:
         json.dump(history, f, indent=2)
 
