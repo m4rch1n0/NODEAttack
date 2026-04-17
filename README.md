@@ -17,7 +17,7 @@ flow models.
 uv sync                      # PyTorch 2.11+rocm7.2, torchdiffeq 0.2.5, etc.
 uv run python train.py       # train ODEClassifier on CIFAR-10 (~50 epochs)
 uv run python attack.py      # run the AntiNODE attack
-uv run python evaluate.py    # NFE table, benign wall-clock latency, figures
+uv run python evaluate.py    # NFE table, wall-clock latency, figures
 ```
 
 Optimizer matches the paper (Adam, lr=5e-4, 2000 iterations, dopri5 with
@@ -50,15 +50,20 @@ Paper reference (Table 1, CIFAR-10 Dopri5): Unrestricted +42.5%,
 Restricted +37.5%. β ∈ {0.1, 1} extend beyond the paper's restricted
 values; see `summary.json` for the full 5-β sweep.
 
-Benign wall-clock latency: **19.73 ± 0.40 ms** per image (batch=1, AMD
-RX 6900 XT + ROCm 7.2, 250-image sweep with 10 warmup forwards).
-Adversarial wall-clock is not measured directly — it scales
-proportionally to NFE, which is already reported.
+Wall-clock latency is measured directly for benign and for each
+adversarial β (batch=1, AMD RX 6900 XT + ROCm 7.2, 10 warmup forwards).
+Benign baseline: **19.73 ± 0.40 ms** per image. Pooled across benign +
+3 primary β (≈1000 points), per-image latency is a near-linear function
+of NFE — **slope ≈ 0.69 ms/NFE, R² = 0.989** — which empirically
+validates using NFE as a proxy for latency on this architecture. The
+unrestricted attack's +31.5% NFE at β=0 therefore translates into
+≈ +29% of inference time.
 
 Figures and `summary.json` are not versioned in the repo. Regenerate
 them with `uv run python evaluate.py` — outputs land in
-`results/figures/` (NFE distribution, NFE vs L2 scatter, attack
-success / flip-rate bar charts) and `results/summary.json`.
+`results/figures/` (NFE distribution, NFE vs L2 scatter, latency vs
+NFE with linear fit, attack success / flip-rate bar charts) and
+`results/summary.json`.
 
 ## Thesis context
 
