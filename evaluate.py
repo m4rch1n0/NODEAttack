@@ -1,9 +1,9 @@
 """Evaluate AntiNODE reproduction results (CIFAR-10, Dopri5).
 
 Reads the merged per-image attack results (5 betas), prints a paper-style
-comparison table (NFE, L2, wall-clock latency), generates three figures
-(NFE distribution, NFE vs L2 scatter, attack success rates), and saves
-an aggregated summary JSON.
+comparison table (NFE, L2, wall-clock latency), generates four figures
+(NFE distribution, NFE vs L2 scatter, latency vs NFE, attack success
+rates), and saves an aggregated summary JSON.
 
 Wall-clock latency is measured for the benign forward pass and for each
 adversarial beta whose tensors were saved by attack.py in
@@ -52,7 +52,6 @@ ADV_SETTINGS = list(BETA_FOR_SETTING.keys())
 NFE_PER_ITER = 6.5
 
 # Paper Table 1 reference (CIFAR-10, Dopri5)
-PAPER_BASELINE_ITERS = 4.0
 PAPER_UNRESTRICTED_ITERS = 5.7
 PAPER_UNRESTRICTED_INCREASE = 42.5  # percent
 PAPER_RESTRICTED_ITERS = 5.5
@@ -166,6 +165,10 @@ def _time_forward_passes(model, device, images):
         "p50_ms": float(np.percentile(arr, 50)),
         "n": len(images),
         "device": device.type,
+        # Raw per-image measurements, consumed by plot_latency_vs_nfe.
+        # Stripped from summary.json by write_summary_json to keep the
+        # JSON surface as aggregated stats only.
+        "samples_ms": latencies_ms,
     }
 
 
@@ -276,6 +279,9 @@ def print_reproduction_table(settings, latency_data):
 # regime of beta={0, 0.001, 0.01}. The full 5-beta sweep lives in
 # summary.json; plots are only for the regime that matches Table 1.
 PLOT_ORDER = ["benign", "unrestricted_0", "restricted_0.001", "restricted_0.01"]
+# Adv-only subset. Derived from PLOT_ORDER so the "3 paper-aligned betas"
+# policy is enforced in one place — plot functions never hardcode the list.
+ADV_PLOT_KEYS = [k for k in PLOT_ORDER if k != "benign"]
 PLOT_LABELS = {
     "benign": "Benign",
     "unrestricted_0": r"Unrestricted ($\beta=0$)",
@@ -291,81 +297,178 @@ PLOT_COLORS = {
 
 
 def plot_nfe_distribution(settings, out_path):
+    # Benign is a delta at NFE=26 for all images — as a histogram bar
+    # it would dominate y, as a vertical line it would visually collide
+    # at NFE=26 with the attack-but-failed population (misleading, since
+    # the bin at 26 is a mix of benign + failed attacks). Relegate it
+    # to a corner annotation. Step histograms (no fills) avoid false
+    # "blended" legend categories. Log y-scale exposes the tail: rare
+    # images the attack destabilized the most (NFE up to ~56).
+    # Per-distribution means are intentionally NOT drawn — they live in
+    # the README table; a dashed line at NFE≈34 reads as an arbitrary
+    # threshold to a reader not already looking for it.
     fig, ax = plt.subplots(figsize=(6, 4), dpi=150)
+    benign_nfe = float(np.mean([r["nfe"] for r in settings["benign"]]))
+    n_benign = len(settings["benign"])
+
     all_nfes = np.concatenate([
-        [r["nfe"] for r in settings[k]] for k in PLOT_ORDER
+        [r["nfe"] for r in settings[k]] for k in ADV_PLOT_KEYS
     ])
     bins = np.arange(all_nfes.min() - 1, all_nfes.max() + 2) - 0.5
 
-    for key in PLOT_ORDER:
+    # Phantom entry (drawn at NaN, invisible) so benign appears as the
+    # first legend item without introducing a misleading plot element
+    # at NFE=26 that would collide with attack-but-failed counts.
+    ax.plot(
+        [np.nan], [np.nan], color=PLOT_COLORS["benign"], linewidth=2,
+        label=f"Benign (NFE={benign_nfe:.0f}, all {n_benign}/{n_benign})",
+    )
+    for key in ADV_PLOT_KEYS:
         nfes = [r["nfe"] for r in settings[key]]
         ax.hist(
-            nfes, bins=bins, alpha=0.5,
+            nfes, bins=bins, histtype="step",
             color=PLOT_COLORS[key], label=PLOT_LABELS[key],
-            edgecolor="black", linewidth=0.3,
-        )
-        ax.axvline(
-            float(np.mean(nfes)), color=PLOT_COLORS[key],
-            linestyle="--", linewidth=1.2,
+            linewidth=1.8,
         )
 
+    ax.set_yscale("log")
     ax.set_xlabel("NFE (number of function evaluations)")
-    ax.set_ylabel("Count")
+    ax.set_ylabel("Count (log scale)")
     ax.set_title("NFE distribution under latency attack")
-    ax.legend(frameon=False, fontsize=9)
+    ax.legend(frameon=False, fontsize=9, loc="upper right")
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
 
 def plot_nfe_vs_l2(settings, out_path):
-    fig, ax = plt.subplots(figsize=(6, 4), dpi=150)
+    # Small multiples: one panel per attack regime, y-axis shared so
+    # vertical comparisons are meaningful, x-axis independent so each
+    # panel uses its full resolution (L2 ranges differ by ~10x across
+    # betas). Vertical jitter disambiguates the discrete NFE grid
+    # (Dopri5+FSAL gives integer-multiples-of-step NFE), otherwise
+    # all 250 points pile onto a handful of horizontal lines.
     baseline_nfe = float(np.mean([r["nfe"] for r in settings["benign"]]))
 
-    for key in ("unrestricted_0", "restricted_0.001", "restricted_0.01"):
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4), dpi=150, sharey=True)
+    rng = np.random.default_rng(0)
+
+    for ax, key in zip(axes, ADV_PLOT_KEYS):
         records = settings[key]
-        l2s = [r["l2"] for r in records]
-        nfes = [r["nfe"] for r in records]
+        l2s = np.array([r["l2"] for r in records])
+        nfes = np.array([r["nfe"] for r in records], dtype=float)
+        nfes_j = nfes + rng.uniform(-0.3, 0.3, size=nfes.shape)
         ax.scatter(
-            l2s, nfes, s=12, alpha=0.55,
+            l2s, nfes_j, s=14, alpha=0.55,
+            color=PLOT_COLORS[key], edgecolors="none",
+        )
+        ax.axhline(
+            baseline_nfe, color="gray", linestyle=":", linewidth=1.0,
+            label=f"Baseline = {baseline_nfe:.1f}",
+        )
+        # Annotate the L2 range in the title so a fast reader cannot
+        # mistake the per-panel x-scale for a global one: beta=0 spans
+        # L2 up to ~9, beta=0.01 barely reaches 0.5 — with independent
+        # x-axes this would otherwise look like "beta=0.01 is empty".
+        ax.set_title(
+            f"{PLOT_LABELS[key]}, $L_2 \\in [{l2s.min():.2f}, {l2s.max():.2f}]$",
+            fontsize=9,
+        )
+        ax.set_xlabel(r"$L_2$ distortion $\|x_{adv} - x\|_2^2$")
+        ax.legend(frameon=False, fontsize=8, loc="upper right")
+
+    axes[0].set_ylabel("Adversarial NFE (jittered)")
+    fig.suptitle(r"NFE vs $L_2$ distortion by attack regime", y=1.02)
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_latency_vs_nfe(settings, latency_data, out_path):
+    # Per-image scatter (benign + 3 primary betas), pooled and linearly
+    # regressed. The claim this figure supports is structural: per-image
+    # wall-clock cost is explained by NFE *alone*, with the same slope
+    # across attack regimes — i.e., the choice of beta just slides points
+    # along one universal line. This is the justification for using NFE
+    # as a latency proxy throughout the thesis.
+    fig, ax = plt.subplots(figsize=(7, 5), dpi=150)
+    rng = np.random.default_rng(0)
+
+    all_nfe, all_lat = [], []
+    for key in PLOT_ORDER:
+        if key == "benign":
+            lat_stats = latency_data.get("benign")
+        else:
+            lat_stats = latency_data["adv"].get(key)
+        if lat_stats is None or "samples_ms" not in lat_stats:
+            continue
+        nfes = np.array([r["nfe"] for r in settings[key]], dtype=float)
+        lats = np.asarray(lat_stats["samples_ms"])
+        if len(nfes) != len(lats):
+            print(f"  plot_latency_vs_nfe: skip {key} (size mismatch)")
+            continue
+        # Horizontal jitter spreads the discrete NFE grid (Dopri5+FSAL).
+        nfes_j = nfes + rng.uniform(-0.4, 0.4, size=nfes.shape)
+        ax.scatter(
+            nfes_j, lats, s=9, alpha=0.4,
             color=PLOT_COLORS[key], label=PLOT_LABELS[key],
             edgecolors="none",
         )
+        all_nfe.append(nfes)
+        all_lat.append(lats)
 
-    ax.axhline(
-        baseline_nfe, color="gray", linestyle=":", linewidth=1.0,
-        label=f"Baseline NFE = {baseline_nfe:.1f}",
-    )
-    ax.set_xlabel(r"$L_2$ distortion $\|x_{adv} - x\|_2^2$")
-    ax.set_ylabel("Adversarial NFE")
-    ax.set_title(r"NFE vs $L_2$ distortion")
-    ax.legend(frameon=False, fontsize=9)
+    if all_nfe:
+        pooled_nfe = np.concatenate(all_nfe)
+        pooled_lat = np.concatenate(all_lat)
+        slope, intercept = np.polyfit(pooled_nfe, pooled_lat, 1)
+        pred = slope * pooled_nfe + intercept
+        ss_res = float(((pooled_lat - pred) ** 2).sum())
+        ss_tot = float(((pooled_lat - pooled_lat.mean()) ** 2).sum())
+        r2 = 1.0 - ss_res / ss_tot
+
+        x_fit = np.array([pooled_nfe.min() - 1, pooled_nfe.max() + 1])
+        y_fit = slope * x_fit + intercept
+        ax.plot(
+            x_fit, y_fit, color="black", linestyle="-", linewidth=1.2,
+            label=(
+                f"Linear fit: {slope:.2f}·NFE + {intercept:.2f} "
+                f"($R^2={r2:.3f}$)"
+            ),
+        )
+
+    ax.set_xlabel("NFE (number of function evaluations)")
+    ax.set_ylabel("Wall-clock latency (ms, batch=1)")
+    ax.set_title("Per-image latency vs NFE — pooled across attack regimes")
+    ax.legend(frameon=False, fontsize=8, loc="upper left")
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
 
 def plot_attack_success_rate(settings, out_path):
-    keys = ["unrestricted_0", "restricted_0.001", "restricted_0.01"]
     benign_nfe = [r["nfe"] for r in settings["benign"]]
 
-    success = [attack_success_rate(settings[k], benign_nfe) * 100 for k in keys]
-    flips = [label_flip_rate(settings[k]) * 100 for k in keys]
+    success = [attack_success_rate(settings[k], benign_nfe) * 100 for k in ADV_PLOT_KEYS]
+    flips = [label_flip_rate(settings[k]) * 100 for k in ADV_PLOT_KEYS]
 
-    x = np.arange(len(keys))
+    x = np.arange(len(ADV_PLOT_KEYS))
     width = 0.38
 
     fig, ax = plt.subplots(figsize=(6, 4), dpi=150)
-    ax.bar(x - width / 2, success, width, label="Efficiency attack success",
-           color="#4c72b0", edgecolor="black", linewidth=0.4)
-    ax.bar(x + width / 2, flips, width, label="Label flip rate",
-           color="#dd8452", edgecolor="black", linewidth=0.4)
+    bars_s = ax.bar(x - width / 2, success, width,
+                    label="Efficiency attack success",
+                    color="#4c72b0", edgecolor="black", linewidth=0.4)
+    bars_f = ax.bar(x + width / 2, flips, width,
+                    label="Label flip rate",
+                    color="#dd8452", edgecolor="black", linewidth=0.4)
+    ax.bar_label(bars_s, fmt="%.1f%%", fontsize=8, padding=2)
+    ax.bar_label(bars_f, fmt="%.1f%%", fontsize=8, padding=2)
 
     ax.set_xticks(x)
-    ax.set_xticklabels([PLOT_LABELS[k] for k in keys], fontsize=9)
-    ax.set_ylabel("Percentage of 250 images")
+    ax.set_xticklabels([PLOT_LABELS[k] for k in ADV_PLOT_KEYS], fontsize=9)
+    ax.set_ylabel(f"Percentage of {len(benign_nfe)} images")
     ax.set_title("Efficiency attack vs accuracy attack")
-    ax.set_ylim(0, 105)
+    ax.set_ylim(0, 110)
     ax.legend(frameon=False, fontsize=9)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
@@ -373,6 +476,11 @@ def plot_attack_success_rate(settings, out_path):
 
 
 # ── Summary JSON ─────────────────────────────────────────────────────
+
+def _stats_only(lat_dict):
+    """Drop raw per-image samples so summary.json stays aggregated-only."""
+    return {k: v for k, v in lat_dict.items() if k != "samples_ms"}
+
 
 def write_summary_json(settings, latency_data, path):
     benign_nfe = [r["nfe"] for r in settings["benign"]]
@@ -384,7 +492,7 @@ def write_summary_json(settings, latency_data, path):
     }
     out["settings"]["benign"] = {
         "nfe": summary_stats(benign_nfe),
-        "latency_ms": latency_data["benign"],
+        "latency_ms": _stats_only(latency_data["benign"]),
     }
 
     for key in ADV_SETTINGS:
@@ -398,7 +506,7 @@ def write_summary_json(settings, latency_data, path):
             "label_flip_rate": label_flip_rate(recs),
         }
         if key in latency_data["adv"]:
-            setting_out["latency_ms"] = latency_data["adv"][key]
+            setting_out["latency_ms"] = _stats_only(latency_data["adv"][key])
         out["settings"][key] = setting_out
 
     with open(path, "w") as f:
@@ -420,6 +528,7 @@ def main(args):
     print_reproduction_table(settings, latency_data)
     plot_nfe_distribution(settings, figures_dir / "nfe_distribution.pdf")
     plot_nfe_vs_l2(settings, figures_dir / "nfe_vs_l2.pdf")
+    plot_latency_vs_nfe(settings, latency_data, figures_dir / "latency_vs_nfe.pdf")
     plot_attack_success_rate(settings, figures_dir / "attack_success_rate.pdf")
     write_summary_json(settings, latency_data, summary_path)
     print(f"\nSaved: {figures_dir}/*.pdf and {summary_path}")
